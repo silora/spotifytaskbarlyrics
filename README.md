@@ -1,5 +1,6 @@
 # Minimal Spotify Desktop Lyrics
 
+***UNDER DEVELOPMENT (maybe)***
 ***Only tested on my own pc. Can be buggy.***
 
 **But it looks PRETTY!**
