@@ -1,3 +1,4 @@
 spotipy
 syrics
+pylrc
 PyQt5
