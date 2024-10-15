@@ -9,7 +9,7 @@
 
 | Layout |
 |:------:|
-| ![Layout](ExampleImages\layout.png) |
+| ![Layout](ExampleImages/layout.png) |
 
 ## Made With
 - PyQt5
