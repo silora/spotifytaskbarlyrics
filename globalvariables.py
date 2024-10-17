@@ -24,7 +24,7 @@ TRACKING_APP = "Spotify.exe"
 ### Spotify lyrics can be out of sync at a lot of times, but it prevents mixing up lyrics from different versions
 USE_SPOTIFY_LYRICS = False
 # If True, you need to set SP_DC
-SP_DC = "AQAAJSbVUgcAfoJoYc2nhABGOr4oY3Ap6DmabWEMndxMpZW8zc9Ol9TuL3GEFUMZsEqrjC6SV7aYGhbiCgURyA-yHWqXEl95U7bC34T93FVmT0rl5luyYf74WtlglNZH9OltYBW1dSKukElzPNl0hUnYjwrfSWIh"
+SP_DC = ""
 
 ### Third party lyrics providers
 ### AVAILABLE PROVIDERS (from syncedlyrics): Musixmatch, Lrclib, Deezer, NetEase, Megalobiz, Genius
@@ -44,7 +44,7 @@ THIRD_PARTY_LYRICS_PROVIDERS = ["Musixmatch", "NetEase", "Lrclib"]
 PLAYING_INFO_PROVIDER = "System"
 
 ### If you are using Spotify as the playing info provider, you need to set the Spotify API information (or not? I did remember there is a login popup, anyway chi....)
-SPOTIPY_CLIENT_ID = "675a9fb7bd834810968893c70dfe7330"
-SPOTIPY_CLIENT_SECRET = "d02e71308de24808913bcb65cd544e26"
-SPOTIPY_REDIRECT_URI = "http://localhost:8888/callback"
+SPOTIPY_CLIENT_ID = ""
+SPOTIPY_CLIENT_SECRET = ""
+SPOTIPY_REDIRECT_URI = ""
 
