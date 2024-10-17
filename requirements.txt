@@ -2,3 +2,5 @@ spotipy
 syrics
 pylrc
 PyQt5
+pyautogui
+pillow

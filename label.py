@@ -11,7 +11,29 @@ class OutlinedLabel(QLabel):
         self.mode = relative_outline
         self.setBrush(brushcolor)
         self.setPen(linecolor)
-
+        self.flip = False
+        self._opacity = 1
+        self._font_size = 1
+        self._offset = -1
+        
+    @pyqtProperty(float)
+    def opacity(self):
+        return self._opacity
+    
+    @opacity.setter
+    def opacity(self, value):
+        self._opacity = value
+        self.update()
+        
+    @pyqtProperty(int)
+    def font_size(self):
+        return self._font_size
+    
+    @font_size.setter
+    def font_size(self, value):
+        self._font_size = value
+        self.update()
+        
     def scaledOutlineMode(self):
         return self.mode
 
@@ -47,6 +69,10 @@ class OutlinedLabel(QLabel):
         w = self.outlineThickness()
         rect = self.rect()
         metrics = QFontMetrics(self.font())
+        if self.font() is not None:
+            f = self.font()
+            f.setPixelSize(self.font_size)
+            self.setFont(f)
         tr = metrics.boundingRect(self.text()).adjusted(0, 0, w, w)
         if self.indent() == -1:
             if self.frameWidth():
@@ -72,11 +98,19 @@ class OutlinedLabel(QLabel):
 
         path = QPainterPath()
         path.addText(x, y, self.font(), self.text())
+        path.setFillRule(Qt.WindingFill)
+        path = path.simplified()
         qp = QPainter(self)
+        qp.setOpacity(self.opacity)
         qp.setRenderHint(QPainter.Antialiasing)
+        
+        if self.flip:
+            qp.scale(-1, 1)
+            qp.translate(-self.width(), 0)
 
-        self.pen.setWidthF(w * 2)
-        qp.strokePath(path, self.pen)
+        if self.outlineThickness() > 0:
+            self.pen.setWidthF(w * 2)
+            qp.strokePath(path, self.pen)
         if 1 < self.brush.style() < 15:
             qp.fillPath(path, self.palette().window())
         qp.fillPath(path, self.brush)

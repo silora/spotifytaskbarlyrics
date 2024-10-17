@@ -11,8 +11,29 @@
 |:------:|
 | ![Layout](ExampleImages/layout.png) |
 
+
+| Overview |
+|:----------:|
+| **Song/Artist Level Theme Customization** |
+| ![song_change](gifs/charlixcx_everythingisromantic.gif) |
+| **Easy Offset Setting & Auto Hide** |
+| ![ctrl](gifs/lanadelrey_lovesong.gif) |
+| **Lyrics Line Filter & Reformat** |
+| ![fzl](gifs/yeule_softscars.gif) |
+| **Sufjan Stevens** |
+| ![sfj](gifs/sufjanstevens_chicago.gif) |
+
+## Usage
+```
+pip install -r requirements.txt
+(proxy setting)
+python ./ui.py
+```
+
 ## Made With
 - PyQt5
+- pyautogui
+- pillow
 - [syrics](https://github.com/akashrchandran/Syrics)
 - [spotipy](https://github.com/spotipy-dev/spotipy)
 - [pylrc](https://github.com/doakey3/pylrc)
@@ -23,7 +44,7 @@
 - [This stackoverflow post](https://stackoverflow.com/questions/79080076/how-to-set-a-qwidget-hidden-when-mouse-hovering-and-reappear-when-mouse-leaving)
 - [Py Now Playing](https://github.com/ABUCKY0/py-now-playing)
 
-## Screenshots
+## Theme Screenshots
 
 | Default |
 |:-------:|

@@ -1,6 +1,7 @@
 import asyncio
 from dataclasses import dataclass
 from datetime import timedelta
+import hashlib
 import time
 from winsdk.windows.media.control import (
     GlobalSystemMediaTransportControlsSessionManager as MediaManager,
@@ -15,17 +16,20 @@ import logging
 import spotipy
 import os
 
-from globalvariables import HTTP_PROXY, HTTPS_PROXY, SPOTIPY_CLIENT_ID, SPOTIPY_CLIENT_SECRET, SPOTIPY_REDIRECT_URI
+from globalvariables import HTTP_PROXY, HTTPS_PROXY, SPOTIPY_CLIENT_ID, SPOTIPY_CLIENT_SECRET, SPOTIPY_REDIRECT_URI, TRACKING_APP
 
 # logging.basicConfig(level=logging.INFO)
 
 os.environ["SPOTIPY_CLIENT_ID"] = SPOTIPY_CLIENT_ID
 os.environ["SPOTIPY_CLIENT_SECRET"] = SPOTIPY_CLIENT_SECRET
 os.environ["SPOTIPY_REDIRECT_URI"] = SPOTIPY_REDIRECT_URI
-os.environ["http_proxy"] = HTTP_PROXY
-os.environ["https_proxy"] = HTTPS_PROXY
-os.environ["HTTP_PROXY"] = HTTP_PROXY
-os.environ["HTTPS_PROXY"] = HTTPS_PROXY
+
+# if HTTP_PROXY and HTTP_PROXY != "":
+#     os.environ["http_proxy"] = HTTP_PROXY
+#     os.environ["HTTP_PROXY"] = HTTP_PROXY
+# if HTTPS_PROXY and HTTPS_PROXY != "":
+#     os.environ["https_proxy"] = HTTPS_PROXY
+#     os.environ["HTTPS_PROXY"] = HTTPS_PROXY
 
 
 @dataclass
@@ -34,6 +38,7 @@ class TrackInfo:
     id: str = None
     title: str = None
     length: int = None
+    _hash: str = None
 
     def __str__(self):
         return f"{self.artist} - {self.title} [{self.id}] ({self.length})"
@@ -52,7 +57,17 @@ class TrackInfo:
 
     def to_json(self):
         return json.dumps(self.__dict__)
+    
+    def get_hash(self):
+        h = hashlib.new('sha256')
+        h.update(f'{self.artist} - {self.title}'.encode())
+        return h.hexdigest()
 
+    @property
+    def hash_id(self):
+        if self._hash is None:
+            self._hash = self.get_hash()
+        return self._hash
 
 @dataclass
 class PlayingInfo:
@@ -189,12 +204,21 @@ class NowPlayingSystem(NowPlaying):
         if new_playing_info.progress != old_playing_info.progress:
             return True
         return False
+    
+    def track_check(self, old_playing_info, new_playing_info):
+        if old_playing_info is None or new_playing_info is None:
+            return True
+        if old_playing_info.current_track == new_playing_info.current_track:
+            if old_playing_info.current_track_id is not None:
+                new_playing_info.current_track_id = old_playing_info.current_track_id
+            return False
+        return True
 
     def sync(self):
-        if self.playing_info is not None and self.playing_info.is_playing:
-            logging.info(
-                f"NOW PLAYING: {self.playing_info.current_track_artist} - {self.playing_info.current_track_title} ({int(time.time()*1000) - self.playing_info.current_begin_time}/{self.playing_info.current_track_length})"
-            )
+        # if self.playing_info is not None and self.playing_info.is_playing:
+        #     logging.info(
+        #         f"NOW PLAYING: {self.playing_info.current_track_artist} - {self.playing_info.current_track_title} ({int(time.time()*1000) - self.playing_info.current_begin_time}/{self.playing_info.current_track_length})"
+        #     )
         logging.info("TRY SYNC WITH SYSTEM")
         if not self.sync_mutex.tryLock(timeout=0):
             logging.info("SYNCING SKIPPED")
@@ -203,11 +227,23 @@ class NowPlayingSystem(NowPlaying):
         if info is None:
             self.sync_mutex.unlock()
             return
-        if self.update_check(self.playing_info, info):
-            logging.info("SYNCING")
+        if not info.is_playing:
+            logging.info("PAUSING")
             self.playing_info = info
             if self.update_callback is not None:
                 self.update_callback(self.playing_info)
+            self.sync_mutex.unlock()
+            return
+        if self.track_check(self.playing_info, info):
+            print("NEW TRACK: ", info.current_track)
+            self.playing_info = info
+            if self.update_callback is not None:
+                self.update_callback(self.playing_info)
+            self.sync_mutex.unlock()
+            return
+        if self.update_check(self.playing_info, info):
+            logging.info("SYNCING")
+            self.playing_info = info
         self.sync_mutex.unlock()
 
     async def get_media_manager(self):
@@ -217,7 +253,7 @@ class NowPlayingSystem(NowPlaying):
         logging.info("GETTING SPOTIFY ID")
         sessions = self.manager.get_sessions()
         sessions = [session.source_app_user_model_id for session in sessions]
-        if "Spotify.exe" not in sessions:
+        if TRACKING_APP not in sessions:
             return None
         amuids = subprocess.check_output(
             ["powershell.exe", "Get-StartApps | ConvertTo-Json"],
@@ -226,8 +262,8 @@ class NowPlayingSystem(NowPlaying):
         )
         amuids = json.loads(amuids.decode("gbk").replace("\r\n", "\n"))
         for app in amuids:
-            if app["AppID"].split("\\")[-1] == "Spotify.exe":
-                return "Spotify.exe"
+            if app["AppID"].split("\\")[-1] == TRACKING_APP:
+                return TRACKING_APP
         return None
 
     async def get_now_playing_info(self):
@@ -340,7 +376,8 @@ class NowPlayingSpotify(NowPlaying):
         info, current_time = None, int(time.time() * 1000)
         try:
             info = self.spotify_connector.current_user_playing_track()
-        except:
+        except Exception as e:
+            logging.info(e)
             logging.info("SPOTIFY CONNECTION FAILED")
             return None
         if info is None:
@@ -410,10 +447,10 @@ class NowPlayingMixed(NowPlaying):
         return True
 
     def sync(self):
-        if self.playing_info is not None and self.playing_info.is_playing:
-            logging.info(
-                f"NOW PLAYING: {self.playing_info.current_track_artist} - {self.playing_info.current_track_title} ({int(time.time()*1000) - self.playing_info.current_begin_time}/{self.playing_info.current_track_length})"
-            )
+        # if self.playing_info is not None and self.playing_info.is_playing:
+        #     logging.info(
+        #         f"NOW PLAYING: {self.playing_info.current_track_artist} - {self.playing_info.current_track_title} ({int(time.time()*1000) - self.playing_info.current_begin_time}/{self.playing_info.current_track_length})"
+        #     )
         logging.info("TRY SYNC WITH SYSTEM")
         if not self.sync_mutex.tryLock(timeout=0):
             logging.info("SYNCING SKIPPED")
@@ -430,7 +467,7 @@ class NowPlayingMixed(NowPlaying):
             self.sync_mutex.unlock()
             return
         if self.track_check(self.playing_info, info):
-            logging.info("NEW TRACK: ", info.current_track)
+            print("NEW TRACK: ", info.current_track)
             self.playing_info = info
             self.synced_with_spotify = False
         if not self.synced_with_spotify:
@@ -448,6 +485,7 @@ class NowPlayingMixed(NowPlaying):
                 return
             self.playing_info.current_track_id = onlineinfo.current_track_id
             self.synced_with_spotify = True
+            print("NEW TRACK: ", info.current_track)
             if self.update_callback is not None:
                 self.update_callback(self.playing_info)
         elif self.system.update_check(self.playing_info, info):
@@ -458,7 +496,7 @@ class NowPlayingMixed(NowPlaying):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    np = NowPlayingMixed()
+    np = NowPlayingSystem()
     np.start_loop()
-    # breakpoint()
+    breakpoint()
     sys.exit(app.exec_())
