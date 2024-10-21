@@ -34,6 +34,26 @@ class OutlinedLabel(QLabel):
         self._font_size = value
         self.update()
         
+    @pyqtProperty(str)
+    def font_family(self):
+        return self.font().family()
+    
+    @font_family.setter
+    def font_family(self, value):
+        f = self.font()
+        f.setFamily(value)
+        self.setFont(f)
+        
+    @pyqtProperty(int)
+    def font_weight(self):
+        return self.font().weight()
+    
+    @font_weight.setter
+    def font_weight(self, value):
+        f = self.font()
+        f.setWeight(value)
+        self.setFont(f)
+        
     def scaledOutlineMode(self):
         return self.mode
 

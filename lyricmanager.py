@@ -1,10 +1,10 @@
-import asyncio
 from dataclasses import dataclass
 import json
 import logging
 import os
 import re
 import syncedlyricspatch as syncedlyrics
+from PyQt5.QtCore import pyqtSignal, QThread
 from pylrc.parser import synced_line_regex, validateTimecode
 from syrics.api import Spotify as LyricsSpotify
 
@@ -175,26 +175,118 @@ class FromThirdParty(LyricsProvider):
             return None
         return lyrics
 
+class LyricsThread(QThread):
+
+    def __init__(self, maintainer, track, holder, callback=None, lock=None, force_refresh=False, source=None):
+        super().__init__()
+        self.maintainer = maintainer
+        self.track = track
+        self.force_refresh = force_refresh
+        self.source = source
+        self.callback = callback
+        self.holder = holder
+        self.lock = lock
+        self.cancelled = False
+        
+    def cancel(self):
+        self.cancelled = True
+        
+    def gracefully_out(self):
+        if self.lock is not None:
+            self.lock.unlock()
+        if self.holder is not None:
+            self.holder.remove(self)
+        return
+
+    def run(self):
+        while self.lock.tryLock(timeout=1000):
+            if self.cancelled:
+                self.gracefully_out()
+                return
+        if self.cancelled:
+            self.gracefully_out()
+            return
+        if not os.path.exists(self.maintainer.cache_dir):
+            os.makedirs(self.maintainer.cache_dir)
+        ret = None
+        if not self.force_refresh and not self.source:
+            if self.track.id is not None and os.path.exists(f"{self.maintainer.cache_dir}/{self.track.id}.json"):
+                jsn = json.load(open(f"{self.maintainer.cache_dir}/{self.track.id}.json", "r", encoding="utf-8"))
+                if jsn is not None and "lyrics" in jsn and "syncType" in jsn["lyrics"] and jsn["lyrics"]["syncType"] == "LINE_SYNCED":
+                    ret = Lyrics.from_json(jsn, self.track)    
+                    if self.cancelled:
+                        self.gracefully_out()
+                        return
+                    if self.callback is not None:
+                        self.callback((ret, self.track))
+                        self.gracefully_out()
+                    return
+            if os.path.exists(f"{self.maintainer.cache_dir}/{self.track.hash_id}.json"):
+                jsn = json.load(open(f"{self.maintainer.cache_dir}/{self.track.hash_id}.json", "r", encoding="utf-8"))
+                if jsn is not None and "lyrics" in jsn and "syncType" in jsn["lyrics"] and jsn["lyrics"]["syncType"] == "LINE_SYNCED":
+                    ret = Lyrics.from_json(jsn, self.track)
+                    if self.cancelled:
+                        self.gracefully_out()
+                        return
+                    if self.callback is not None:
+                        self.callback((ret, self.track))
+                        self.gracefully_out()
+                    return
+        if self.cancelled:
+            self.gracefully_out()
+            return
+        if self.source is None:
+            self.source = list(self.maintainer.providers.keys())
+        elif isinstance(self.source, str):
+            self.source = [self.source if self.source in self.maintainer.providers else None]
+        else:
+            self.source = [s if s in self.maintainer.providers else None for s in self.source]
+        for name in self.source:
+            if self.cancelled:
+                self.gracefully_out()
+                return
+            provider = self.maintainer.providers[name]
+            lyrics = provider.get_lyrics(self.track)
+            if lyrics is not None:
+                self.maintainer.save_lyrics(self.track, lyrics)
+                lyrics.source = name
+                ret = lyrics
+            if ret is not None:
+                logging.info(f"LYRICS FOUND: {self.track.artist} - {self.track.title} from {provider.__class__.__name__}")
+                break
+        if self.cancelled:
+            self.gracefully_out()
+            return
+        if self.callback is not None:
+            self.callback((ret, self.track))
+        self.gracefully_out()
+        
+        
 class LyricsManager():
     def __init__(self, cache_dir="lyrics", providers=[]):
         self.cache_dir = cache_dir
         self.providers = providers
         self.getter = None
-        self.loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self.loop)
-        # self.loop.
+        
+        self.lyrics_gripper = set()
+        self.lyrics_track = None
     
-    def get_lyrics(self, track: TrackInfo, callback: callable = None, force_refresh=False, source=None):
-        # if self.getter is not None:
-        #     self.getter.cancel()
-        # print(">>>Getting Lyrics")
-        # self.getter = self.loop.create_task(self.get_lyrics_async(track, callback))
-        # print(">>>Got Lyrics")
-        # # if callback is not None:
-        # #     self.getter.add_done_callback(callback)
+    def get_lyrics(self, track: TrackInfo, callback: callable = None, lock = None, force_refresh=False, source=None):
         print("GETTING LYRICS FOR ", str(track), "FROM ", source)
-        callback(self.loop.run_until_complete(self.get_lyrics_async(track, force_refresh=force_refresh, source=source)))
-
+        
+        found = False
+        for lg in self.lyrics_gripper:
+            if lg.track == track and lg.source == source and not lg.cancelled:
+                found = True
+            else:
+                lg.cancel()
+        if found:
+            return
+        
+        lg = LyricsThread(self, track, self.lyrics_gripper, callback, lock, force_refresh, source)
+        self.lyrics_gripper.add(lg)
+        lg.start()
+        
     def save_lyrics(self, track: TrackInfo, lyrics: Lyrics):
         if lyrics is None:
             json.dump({}, open(f"{self.cache_dir}/{track.hash_id}.json", "w", encoding="utf-8"), ensure_ascii=False)
@@ -202,47 +294,57 @@ class LyricsManager():
             lyrics.to_json_file(f"{self.cache_dir}/{track.id}.json")
         lyrics.to_json_file(f"{self.cache_dir}/{track.hash_id}.json")
         
-    async def get_lyrics_async(self, track: TrackInfo, callback: callable = None, force_refresh=False, source=None):
-        if not os.path.exists(self.cache_dir):
-            os.makedirs(self.cache_dir)
-        ret = None
-        if not force_refresh and not source:
-            if track.id is not None and os.path.exists(f"{self.cache_dir}/{track.id}.json"):
-                jsn = json.load(open(f"{self.cache_dir}/{track.id}.json", "r", encoding="utf-8"))
-                if jsn is not None and "lyrics" in jsn and "syncType" in jsn["lyrics"] and jsn["lyrics"]["syncType"] == "LINE_SYNCED":
-                    ret = Lyrics.from_json(jsn, track)    
-                    if callback is not None:
-                        callback(ret)
-                    return ret
-            if os.path.exists(f"{self.cache_dir}/{track.hash_id}.json"):
-                jsn = json.load(open(f"{self.cache_dir}/{track.hash_id}.json", "r", encoding="utf-8"))
-                if jsn is not None and "lyrics" in jsn and "syncType" in jsn["lyrics"] and jsn["lyrics"]["syncType"] == "LINE_SYNCED":
-                    ret = Lyrics.from_json(jsn, track)
-                    if callback is not None:
-                        callback(ret)
-                    return ret
-        print(source)
-        if source is None:
-            source = list(self.providers.keys())
-        elif isinstance(source, str):
-            source = [source if source in self.providers else None]
-        else:
-            source = [s if s in self.providers else None for s in source]
-        print("Fetching lyrics from ", source)
-        for name in source:
-            print("Trying ", name)
-            provider = self.providers[name]
-            lyrics = provider.get_lyrics(track)
-            if lyrics is not None:
-                self.save_lyrics(track, lyrics)
-                lyrics.source = name
-                ret = lyrics
-            if ret is not None:
-                logging.info(f"LYRICS FOUND: {track.artist} - {track.title} from {provider.__class__.__name__}")
-                break
-        if callback is not None:
-            callback(ret)
-        return ret
+    # def get_lyrics_async(self, track: TrackInfo, callback: callable = None, force_refresh=False, source=None):
+    #     while self.gripper_cancelled:
+    #         asyncio.sleep(0.5)
+    #     if not os.path.exists(self.cache_dir):
+    #         os.makedirs(self.cache_dir)
+    #     ret = None
+    #     if not force_refresh and not source:
+    #         if track.id is not None and os.path.exists(f"{self.cache_dir}/{track.id}.json"):
+    #             jsn = json.load(open(f"{self.cache_dir}/{track.id}.json", "r", encoding="utf-8"))
+    #             if jsn is not None and "lyrics" in jsn and "syncType" in jsn["lyrics"] and jsn["lyrics"]["syncType"] == "LINE_SYNCED":
+    #                 ret = Lyrics.from_json(jsn, track)    
+    #                 if callback is not None:
+    #                     callback(ret)
+    #                 return ret
+    #         if os.path.exists(f"{self.cache_dir}/{track.hash_id}.json"):
+    #             jsn = json.load(open(f"{self.cache_dir}/{track.hash_id}.json", "r", encoding="utf-8"))
+    #             if jsn is not None and "lyrics" in jsn and "syncType" in jsn["lyrics"] and jsn["lyrics"]["syncType"] == "LINE_SYNCED":
+    #                 ret = Lyrics.from_json(jsn, track)
+    #                 if callback is not None:
+    #                     callback(ret)
+    #                 return ret
+    #     if self.gripper_cancelled:
+    #         self.gripper_cancelled = False
+    #         return
+    #     if source is None:
+    #         source = list(self.providers.keys())
+    #     elif isinstance(source, str):
+    #         source = [source if source in self.providers else None]
+    #     else:
+    #         source = [s if s in self.providers else None for s in source]
+    #     print("Fetching lyrics from ", source)
+    #     for name in source:
+    #         if self.gripper_cancelled:
+    #             self.gripper_cancelled = False
+    #             return
+    #         print("Trying ", name)
+    #         provider = self.providers[name]
+    #         lyrics = provider.get_lyrics(track)
+    #         if lyrics is not None:
+    #             self.save_lyrics(track, lyrics)
+    #             lyrics.source = name
+    #             ret = lyrics
+    #         if ret is not None:
+    #             logging.info(f"LYRICS FOUND: {track.artist} - {track.title} from {provider.__class__.__name__}")
+    #             break
+    #     if self.gripper_cancelled:
+    #         self.gripper_cancelled = False
+    #         return
+    #     if callback is not None:
+    #         callback(ret)
+    #     return ret
                 
 if __name__ == "__main__":
     lm = LyricsManager(providers=[FromSpotify(SP_DC), FromThirdParty()])

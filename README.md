@@ -1,6 +1,8 @@
-# Minimal Spotify ~~Desktop~~ Taskbar Lyrics
+# Minimal ~~Desktop~~ Taskbar Lyrics For *(Mainly)* Spotify 
 
 **You can still tweak it to make it like a normal draggable lyrics widget though**
+
+<span style="color:red; font-weight:bold;">Also works for other music players! (Though I didn't try many...)</span>
 
 ***UNDER DEVELOPMENT (maybe)***
 ***Only tested on my own pc. Can be buggy.***
@@ -24,25 +26,25 @@
 | ![sfj](gifs/sufjanstevens_chicago.gif) |
 
 ## Usage
+
+### Setup
 ```
 pip install -r requirements.txt
 (proxy setting)
 python ./ui.py
 ```
 
-## Made With
-- PyQt5
-- pyautogui
-- pillow
-- [syrics](https://github.com/akashrchandran/Syrics)
-- [spotipy](https://github.com/spotipy-dev/spotipy)
-- [pylrc](https://github.com/doakey3/pylrc)
-- [winsdk](https://github.com/pywinrt/python-winsdk)
+### Control
 
-## With Reference To
-- [This stackoverflow post](https://stackoverflow.com/questions/64290561/qlabel-correct-positioning-for-text-outline)
-- [This stackoverflow post](https://stackoverflow.com/questions/79080076/how-to-set-a-qwidget-hidden-when-mouse-hovering-and-reappear-when-mouse-leaving)
-- [Py Now Playing](https://github.com/ABUCKY0/py-now-playing)
+| Key | Function |
+|:---:|:--------:|
+| Ctrl + Mouse Hover | Keep the lyrics widget open |
+| Mouse Left Button | Copy current line |
+| Mouse Right Button | Switch to next lyrics provider |
+| Scroll Up/Down | Adjust track lyrics offset |
+| Shift + Scroll Up/Down | Adjust global lyrics offset |
+
+**It should be noted that the song progress from WRT may be within 0-1 second error, if this bothers you then maybe you should use other spotify-API-based desktop lyrics.**
 
 ## Theme Screenshots
 
@@ -77,13 +79,35 @@ python ./ui.py
             - font
             - background
             - entering animation
-
+- 20241022
+    - Much more stable display:
+        - Auto-hiding when no music is playing
+    - Lyric searching no longer block the whole program
 ## Todo
 
 - [x] Hide when hovered
 - [x] Option for match lyrics without track id
 - [x] Lyric lines filtering
 - [x] Lyric customization
-- [ ] Searching lyrics blocks the whole program ....
-- [ ] Display behavior is not very stable (?)
+- [x] Searching lyrics blocks the whole program ....
+- [x] Display behavior is not very stable (?)
 - [ ] Long lyrics line scrollllllllllll
+- [ ] Better theme management
+- [ ] Fix Musixmatch lyrics searching
+- [ ] Get better syncing with Spicetify?
+
+
+
+## Made With
+- PyQt5
+- pyautogui
+- pillow
+- [syrics](https://github.com/akashrchandran/Syrics)
+- [spotipy](https://github.com/spotipy-dev/spotipy)
+- [pylrc](https://github.com/doakey3/pylrc)
+- [winsdk](https://github.com/pywinrt/python-winsdk)
+
+## With Reference To
+- [This stackoverflow post](https://stackoverflow.com/questions/64290561/qlabel-correct-positioning-for-text-outline)
+- [This stackoverflow post](https://stackoverflow.com/questions/79080076/how-to-set-a-qwidget-hidden-when-mouse-hovering-and-reappear-when-mouse-leaving)
+- [Py Now Playing](https://github.com/ABUCKY0/py-now-playing)

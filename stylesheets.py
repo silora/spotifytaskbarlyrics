@@ -17,12 +17,15 @@ def yeule_style(line):
     return ret
 
 
-def replace_all(line, matches, replacement, cap_first=True):
+def replace_all(line, matches, replacement, word_pass=None, cap_first=True):
     line = line.strip()
     if matches is None:
         return line
     c_list = list(line)
     for match in matches:
+        if word_pass is not None:
+            if any([_ in "".join(c_list[match.start():match.end()]) for _ in word_pass]):
+                continue
         c_list[match.start()] = replacement
         if cap_first:
             if match.start() == 0:
@@ -39,39 +42,39 @@ def replace_all(line, matches, replacement, cap_first=True):
 
 def uncensor(line):
     uncensor_dict = {
-        "fuck": r"(\*\*\*\*(?=( it|ing|er|'s sake| sake|'em | 'em| em| him| her| them)))|((?<=(as ))\*\*\*\*)|((F|(?<= )f)[^a-tw-yzA-TW-YZ]?[^abd-yzABD-YZ]?[^a-jl-yzA-JL-YZ]?(?=([ .!?'\"]|ed |ing |er |in |in' |ers|ed-up )))",
-        "shit": r"((?<=(as ))\*\*\*\*)|((S|(?<= )s)[^a-gi-yzA-GI-YZ]?[^a-hj-yzA-HJ-YZ]?[^a-su-yzA-SU-YZ]?(?=[ .!?'\"]))",
-        "bitch": r"(\*\*\*\*\*(?=(es| ass|-ass|ass| gon)))|((?<=(my |stupid |that ))\*\*\*\*\*)|((B|(?<= )b)[^a-hj-yzA-HJ-YZ]?[^a-su-yzA-SU-YZ]?[^abd-yzABD-YZ]?[^a-gi-yzA-GI-YZ]?(?=([ .!?'\"]|es )))",
+        "fuck": (r"(\*\*\*\*(?=( it|ing|er|'s sake| sake|'em | 'em| em| him| her| them)))|((?<=(mother))\*\*\*\*)|((?<=(as ))\*\*\*\*)|((?<= )[Ff][^a-tw-yzA-TW-YZ]?[^abd-yzABD-YZ]?[^a-jl-yzA-JL-YZ]?(?=([ !?'\"]|ed |ing |er |in |in' |ers|ed-up |\.[^a-zA-Z])))", tuple()),
+        "shit": (r"((?<=(as ))\*\*\*\*)|((?<=(little ))\*\*\*\*)|((?<= )[Ss][^a-gi-yzA-GI-YZ]?[^a-hj-yzA-HJ-YZ]?[^a-su-yzA-SU-YZ]?(?=([ !?'\"]|\.[^a-zA-Z])))", ("sit", "si", "st")),
+        "bitch": (r"(\*\*\*\*\*(?=(es| ass|-ass|ass| gon)))|((?<= )[Bb][^a-hj-yzA-HJ-YZ]?[^a-su-yzA-SU-YZ]?[^abd-yzABD-YZ]?[^a-gi-yzA-GI-YZ]?(?=([ !?'\"]|es |\.[^a-zA-Z])))", ("bit",)),
     }
     for k, v in uncensor_dict.items():
-        line = replace_all(line, re.finditer(v, line), k)
+        line = replace_all(line, re.finditer(v[0], line), k, v[1])
     return line
 
 def default_formatter(line):
     if any([line.strip().startswith(_) for _ in ["作词", "编曲", "制作", "作曲", "混音", "人声", "母带", "监制", "词", "曲", "录", "附加制作", "鼓", "贝斯", "吉他"]]):
         return ""
+    line = uncensor(line)
     if line == "":
         return "♬"
-    else:
-        return uncensor(line)
+    return line
     
 STYLES = {
     "default": {
         "background-color": "#00000000",
         
         "font-color": "#bbbbbb",
-        "font-family": "Consolas, ",
+        "font-family": "Arial",
         "font-size": "30px",
-        "font-weight": "regular",
+        "font-weight": "bold",
         
         
-        "line-color": "#b2b2b2",
+        "line-color": "#7c7a77",
         "line-width": 0.3,
 
         "use-shadow": True,
         "shadow-color": "#ffff97",
         "shadow-offset": [0, 0],
-        "shadow-radius": 10,
+        "shadow-radius": 4,
         
         "flip-text": False,
         
@@ -105,7 +108,7 @@ STYLES = {
         "font-color": "#000000",
         "font-family": "Arial Narrow",
         "font-size": "30px",
-        "font-weight": "thin",
+        "font-weight": "light",
         
         "line-color": "#000000",
         "line-width": 0,
@@ -203,8 +206,9 @@ STYLES = {
         "font-color": "#e0e0e0",
         "font-family": "Roboto Mono",
         "font-size": "25px",
+        "font-weight": "light",
         
-        "line-width": 1,
+        "line-width": 0.3,
         
         "rule": lambda track: (track.artist.lower() in ["beyonce", "beyoncé"] and any([_ in track.title.lower().replace("‘", "'").replace("’", "'") for _ in ["i'm that girl", "cozy", "alien superstar", "cuff it", "energy", "break my soul", "church girl", "plastic off the sofa", "virgo's groove", "move", "heated", "thique", "all up in your mind", "america has a problem", "pure/honey", "summer renaissance", "ameriican requiem", "blackbiird", "16 carriages", "protector", "my rose", "smoke hour", "texas hold 'em", "bodyguard", "dolly p", "jolene", "daughter", "spaghettii", "alliigator tears", "smoke hour ii", "just for fun", "ii most wanted", "levii's jeans", "flamenco", "the linda martell show", "ya ya", "oh louisiana", "desert eagle", "riiverdance", "ii hands ii heaven", "tyrant", "sweet ★ honey ★ buckiin'", "amen"]])),
         
@@ -260,6 +264,19 @@ STYLES = {
         
         "rule": lambda track: (track.artist.lower() == "lana del rey" and (any([_ in track.title.lower().replace("‘", "'").replace("’", "'") for _ in ["the grants", "did you know that there's a tunnel under ocean blvd", "sweet", "a&w", "judah smith interlude", "candy necklace", "jon batiste interlude", "kintsugi", "fingertips", "paris, texas", "grandfather please stand on the shoulders of my father while he's deep-sea fishing", "let the light in", "margaret", "fishtail", "peppers", "taco truck x vb"]]) or track.title.lower().replace("‘", "'").replace("’", "'") in ["sweet"]))
     },
+    "channel orange":{
+        "background-color": "qradialgradient(spread:pad, cx:0.5, cy:0.4, radius:0.5, fx:0.25, fy:0.25, stop:0 #f37521, stop:1 #00000000)",
+        "font-family": "Cooper Black",
+        "font-color": "#ffffff88",
+        
+        "line-width": 0,
+        
+        "shadow-color": "#ffffff",
+        "shadow-radius": 15,
+        
+        
+        "rule": lambda track: (track.artist.lower() == "frank ocean" and any([_ in track.title.lower().replace("‘", "'").replace("’", "'") for _ in ["start", "thinkin bout you", "fertilizer", "sierra leone", "sweet life", "not just money", "super rich kids", "pilot jones", "crack rock", "pyramids", "lost", "white", "monks", "bad religion", "pink matter", "forrest gump", "end"]]))
+    },
     "blonde": {
         "background-color": "qradialgradient(spread:pad, cx:0.5, cy:0.6, radius:0.5, fx:0.75, fy:0.25, stop:0 #e0e0e0, stop:1 #00000000)",
         
@@ -306,6 +323,23 @@ STYLES = {
         
         "rule": lambda track: (track.artist.lower() == "clairo" and any([_ in track.title.lower().replace("‘", "'").replace("’", "'") for _ in ["nomad", "sexy to someone", "second nature", "slow dance", "thank you", "terrapin", "juna", "add up my love", "echo", "glory of the snow", "pier 4"]]))
     },
+    "eusexua": {
+        "background-image": "images/eusexua.png",
+        
+        "font-family": "OBG EUSEXUA 2024",
+        "font-size": "40px",
+        "font-color": "#ffffff",
+        
+        "line-color": "#000000",
+        "line-width": 0,
+        
+        "use-shadow": False,
+        
+        "rule": lambda track: (track.artist.lower() == "fka twigs" and any([_ in track.title.lower().replace("‘", "'").replace("’", "'") for _ in ["eusexua", "perfect stranger"]])),
+        
+        "format": lambda line: line.upper().replace("‘", "").replace("’", "").replace("'", "")
+        
+    },
     
     
     
@@ -319,7 +353,7 @@ STYLES = {
         "shadow-color": "#f63934",
         "shadow-radius": 10,
         
-        "rule": lambda track: (track.artist.lower() in ["宇多田ヒカル", "hikaru utada", "宇多田光"])
+        "rule": lambda track: (track.artist.lower() in ["宇多田ヒカル", "hikaru utada", "宇多田光", "utada"])
     },
     "vampire weekend": {
         "font-color": "#ff7d32",
@@ -345,28 +379,38 @@ STYLES = {
         "rule": lambda track: (track.artist.lower() == "cupcakke")
     },
     "sophie": {
-        "font-color": "#ffffff",
+        "background-image": "images/sophie.png",
+        
+        "font-color": "#ffffffbb",
         "font-family": "Jean",
+        "font-size": "40px",
+        "font-weight": "bold",
         
-        "line-width": 0,
+        "line-width": 1,
+        "line-color": "#ffffffaa",
         
-        "use-shadow": False,
+        "shadow-color": "#ffffff66",
+        "shadow-radius": 5,
+        "shadow-offset": [-3, -3],
         
         "rule": lambda track: (track.artist.lower() == "sophie")
     },
     "phoebe bridgers": {
+        "background-image": "images/phoebebridgers.png",
         "font-family": "AGaramond",
         
         "rule": lambda track: (track.artist.lower() == "phoebe bridgers")
     },
     "caroline polachek": {
+        "background-image": "images/carolinepolachek.png",
         "font-family": "Sinistre",
-        "font-size": "40px",
+        "font-size": "35px",
+        "font-color": "#704212",
         
-        "line-color": "#704212",
+        "line-color": "#adadad",
         "line-width": 0,
         
-        "shadow-color": "#fcce9e",
+        "shadow-color": "#704212",
         "shadow-offset": [0, 0],
         "shadow-radius": 10,
         
@@ -409,9 +453,9 @@ STYLES = {
         "font-size": "25px",
         
         "line-color": "#a4abe0",
-        "line-width": 1.25,
+        "line-width": 0,
         
-        "shadow-color": "#cecece",
+        "shadow-color": "#cecece66",
         "shadow-offset": [3, 3],
         "shadow-radius": 5,
         
@@ -441,6 +485,20 @@ STYLES = {
         "use-shadow": False,
         
         "rule": lambda track: (track.artist.lower() == "lana del rey")
+    },
+    "newjeans": {
+        "background-image": "images/newjeans.png",
+        
+        "font-family": "Binggrae",
+        "font-size": "35px",
+        "font-color": "#b6d6ed",
+        
+        "line-color": "#364551",
+        "line-width": 3,
+        
+        "use-shadow": False,
+        
+        "rule": lambda track: (track.artist.lower() == "newjeans")
     }
     
 }
@@ -463,7 +521,7 @@ def get_style(track: TrackInfo):
             continue
         if style["rule"](track):
             stl_name = name
-            print(f"Applying style {name}")
+            print(f"Matching style {name}")
             stl.update(style)
             if "format" in style:
                 stl["format"] = lambda line: (style["format"](STYLES["default"]["format"](line))) 

@@ -1,6 +1,7 @@
 import asyncio
 from dataclasses import dataclass
 from datetime import timedelta
+from enum import Enum
 import hashlib
 import time
 from winsdk.windows.media.control import (
@@ -31,6 +32,11 @@ os.environ["SPOTIPY_REDIRECT_URI"] = SPOTIPY_REDIRECT_URI
 #     os.environ["https_proxy"] = HTTPS_PROXY
 #     os.environ["HTTPS_PROXY"] = HTTPS_PROXY
 
+class PlayingStatusTrigger(Enum):
+    PAUSE = 1
+    RESUME = 2
+    NEW_TRACK = 3
+    
 
 @dataclass
 class TrackInfo:
@@ -122,7 +128,6 @@ class NowPlaying(QObject):
 
     def start_loop(self):
         self.sync_timer.start(self.sync_interval)
-        self.sync()
 
     def sync(self):
         pass
@@ -189,10 +194,13 @@ class NowPlaying(QObject):
 
 
 class NowPlayingSystem(NowPlaying):
-    def __init__(self, sync_interval=100, update_callback=None):
+    def __init__(self, sync_interval=50, update_callback=None, offset=0):
         super().__init__(sync_interval, update_callback)
         self.manager = asyncio.run(self.get_media_manager())
         self.spotify_id = asyncio.run(self.get_spotify_id())
+        self.has_running_process = self.spotify_id is not None
+        self.is_initialized = False
+        self.offset = offset
 
     def update_check(self, old_playing_info, new_playing_info):
         if old_playing_info is None:
@@ -215,33 +223,52 @@ class NowPlayingSystem(NowPlaying):
         return True
 
     def sync(self):
-        # if self.playing_info is not None and self.playing_info.is_playing:
-        #     logging.info(
-        #         f"NOW PLAYING: {self.playing_info.current_track_artist} - {self.playing_info.current_track_title} ({int(time.time()*1000) - self.playing_info.current_begin_time}/{self.playing_info.current_track_length})"
-        #     )
-        logging.info("TRY SYNC WITH SYSTEM")
+        logging.debug("TRY SYNC WITH SYSTEM")
         if not self.sync_mutex.tryLock(timeout=0):
-            logging.info("SYNCING SKIPPED")
+            logging.debug("SYNCING SKIPPED")
             return
         info = asyncio.run(self.get_now_playing_info())
+        
+        if not self.is_initialized and (info is None or not info.is_playing):
+            logging.info("WAITING FOR SPOTIFY")
+            self.is_initialized = True
+            self.playing_info = None
+            if self.update_callback is not None:
+                self.update_callback(PlayingStatusTrigger.PAUSE)
+            self.sync_mutex.unlock()
+            return
+        self.is_initialized = True
+        if info is None and self.playing_info is not None:
+            logging.info("SPOTIFY DOWN")
+            self.is_initialized = True
+            self.playing_info = None
+            if self.update_callback is not None:
+                self.update_callback(PlayingStatusTrigger.PAUSE)
+            self.sync_mutex.unlock()
+            return
         if info is None:
             self.sync_mutex.unlock()
             return
-        if not info.is_playing:
+        if not info.is_playing and (self.playing_info is not None and self.playing_info.is_playing):
             logging.info("PAUSING")
             self.playing_info = info
             if self.update_callback is not None:
-                self.update_callback(self.playing_info)
+                self.update_callback(PlayingStatusTrigger.PAUSE)
             self.sync_mutex.unlock()
             return
-        if self.track_check(self.playing_info, info):
-            print("NEW TRACK: ", info.current_track)
+        if info.is_playing and (self.playing_info is None or self.track_check(self.playing_info, info)):
+            logging.info("NEW TRACK: ", info.current_track)
             self.playing_info = info
             if self.update_callback is not None:
-                self.update_callback(self.playing_info)
+                self.update_callback(PlayingStatusTrigger.NEW_TRACK)
             self.sync_mutex.unlock()
             return
-        if self.update_check(self.playing_info, info):
+        if info.is_playing and not self.playing_info.is_playing:
+            logging.info("RESUMING")
+            self.playing_info = info
+            if self.update_callback is not None:
+                self.update_callback(PlayingStatusTrigger.RESUME)
+        if self.playing_info and self.update_check(self.playing_info, info):
             logging.info("SYNCING")
             self.playing_info = info
         self.sync_mutex.unlock()
@@ -250,9 +277,10 @@ class NowPlayingSystem(NowPlaying):
         return await MediaManager.request_async()
 
     async def get_spotify_id(self):
-        logging.info("GETTING SPOTIFY ID")
+        logging.debug("GETTING SPOTIFY ID")
         sessions = self.manager.get_sessions()
         sessions = [session.source_app_user_model_id for session in sessions]
+        print(sessions)
         if TRACKING_APP not in sessions:
             return None
         amuids = subprocess.check_output(
@@ -270,7 +298,7 @@ class NowPlayingSystem(NowPlaying):
         if self.spotify_id is None:
             self.spotify_id = await self.get_spotify_id()
         if self.spotify_id is None:
-            logging.info("SPOTIFY DOWN")
+            logging.debug("SPOTIFY DOWN")
             return None
         sessions = self.manager.get_sessions()
         session = next(
@@ -279,7 +307,11 @@ class NowPlayingSystem(NowPlaying):
         )
         if session is not None:
             info_dict = dict()
-            info = await session.try_get_media_properties_async()
+            try:
+                info = await session.try_get_media_properties_async()
+            except Exception as e:
+                logging.debug(e)
+                return None
             if info is not None:
                 info_dict.update(
                     {
@@ -321,7 +353,7 @@ class NowPlayingSystem(NowPlaying):
                     ),
                 ),
                 current_begin_time=(
-                    (current_time - info_dict["position"] / timedelta(milliseconds=1))
+                    (current_time - info_dict["position"] / timedelta(milliseconds=1) + self.offset)
                     if "position" in info_dict
                     else None
                 ),
@@ -331,172 +363,181 @@ class NowPlayingSystem(NowPlaying):
         return None
 
 
-class NowPlayingSpotify(NowPlaying):
-    def __init__(self, sync_interval=100000000, update_callback=None):
-        super().__init__(sync_interval, update_callback)
-        self.scope = "user-read-currently-playing"
-        self.spotify_connector = spotipy.Spotify(
-            auth_manager=spotipy.SpotifyOAuth(scope=self.scope)
-        )
+# class NowPlayingSpotify(NowPlaying):
+#     def __init__(self, sync_interval=100000000, update_callback=None):
+#         super().__init__(sync_interval, update_callback)
+#         self.scope = "user-read-currently-playing"
+#         self.spotify_connector = spotipy.Spotify(
+#             auth_manager=spotipy.SpotifyOAuth(scope=self.scope)
+#         )
 
-    def update_check(self, old_playing_info, new_playing_info):
-        if old_playing_info is None:
-            return True
-        if new_playing_info.is_playing != old_playing_info.is_playing:
-            return True
-        if new_playing_info.current_track != old_playing_info.current_track:
-            return True
-        if new_playing_info.progress != old_playing_info.progress:
-            return True
-        return False
+#     def update_check(self, old_playing_info, new_playing_info):
+#         if old_playing_info is None:
+#             return True
+#         if new_playing_info.is_playing != old_playing_info.is_playing:
+#             return True
+#         if new_playing_info.current_track != old_playing_info.current_track:
+#             return True
+#         if new_playing_info.progress != old_playing_info.progress:
+#             return True
+#         return False
 
-    def sync(self):
-        if self.playing_info is not None and self.playing_info.is_playing:
-            logging.info(
-                f"NOW PLAYING: {self.playing_info.current_track_artist} - {self.playing_info.current_track_title} ({int(time.time()*1000) - self.playing_info.current_begin_time}/{self.playing_info.current_track_length})"
-            )
-        logging.info("TRY SYNC WITH SPOTIFY")
-        if not self.sync_mutex.tryLock(timeout=0):
-            logging.info("SYNCING SKIPPED")
-            return
-        info = None
-        try:
-            info = asyncio.run(self.get_now_playing_info())
-        except:
-            self.sync_mutex.unlock()
-            return
-        if self.update_check(self.playing_info, info):
-            logging.info("SYNCING")
-            self.playing_info = info
-            if self.update_callback is not None:
-                self.update_callback(self.playing_info)
-        self.sync_mutex.unlock()
+#     def sync(self):
+#         if self.playing_info is not None and self.playing_info.is_playing:
+#             logging.debug(
+#                 f"NOW PLAYING: {self.playing_info.current_track_artist} - {self.playing_info.current_track_title} ({int(time.time()*1000) - self.playing_info.current_begin_time}/{self.playing_info.current_track_length})"
+#             )
+#         logging.debug("TRY SYNC WITH SPOTIFY")
+#         if not self.sync_mutex.tryLock(timeout=0):
+#             logging.debug("SYNCING SKIPPED")
+#             return
+#         info = None
+#         try:
+#             info = asyncio.run(self.get_now_playing_info())
+#         except:
+#             self.sync_mutex.unlock()
+#             return
+#         if self.update_check(self.playing_info, info):
+#             logging.debug("SYNCING")
+#             self.playing_info = info
+#             if self.update_callback is not None:
+#                 self.update_callback(self.playing_info)
+#         self.sync_mutex.unlock()
 
-    async def get_now_playing_info(self):
-        info, current_time = None, int(time.time() * 1000)
-        try:
-            info = self.spotify_connector.current_user_playing_track()
-        except Exception as e:
-            logging.info(e)
-            logging.info("SPOTIFY CONNECTION FAILED")
-            return None
-        if info is None:
-            return None
-        return PlayingInfo(
-            current_track=TrackInfo(
-                artist=(
-                info["item"]["artists"][0]["name"]
-                if "artists" in info["item"]
-                and len(info["item"]["artists"]) > 0
-                and "name" in info["item"]["artists"][0]
-                else None
-                ),
-                id=(
-                    info["item"]["id"] if "item" in info and "id" in info["item"] else None
-                ),
-                title=(
-                    info["item"]["name"]
-                    if "item" in info and "name" in info["item"]
-                    else None
-                ),
-                length=(
-                    info["item"]["duration_ms"]
-                    if "item" in info and "duration_ms" in info["item"]
-                    else None
-                )
-            ),
-            current_begin_time=(
-                (current_time - info["progress_ms"]) if "progress_ms" in info else None
-            ),
-            is_playing=info["is_playing"] if "is_playing" in info else None,
-            progress=info["progress_ms"] if "progress_ms" in info else None,
-        )
+#     async def get_now_playing_info(self):
+#         info, current_time = None, int(time.time() * 1000)
+#         try:
+#             info = self.spotify_connector.current_user_playing_track()
+#         except Exception as e:
+#             logging.info(e)
+#             logging.info("SPOTIFY CONNECTION FAILED")
+#             return None
+#         if info is None:
+#             return None
+#         return PlayingInfo(
+#             current_track=TrackInfo(
+#                 artist=(
+#                 info["item"]["artists"][0]["name"]
+#                 if "artists" in info["item"]
+#                 and len(info["item"]["artists"]) > 0
+#                 and "name" in info["item"]["artists"][0]
+#                 else None
+#                 ),
+#                 id=(
+#                     info["item"]["id"] if "item" in info and "id" in info["item"] else None
+#                 ),
+#                 title=(
+#                     info["item"]["name"]
+#                     if "item" in info and "name" in info["item"]
+#                     else None
+#                 ),
+#                 length=(
+#                     info["item"]["duration_ms"]
+#                     if "item" in info and "duration_ms" in info["item"]
+#                     else None
+#                 )
+#             ),
+#             current_begin_time=(
+#                 (current_time - info["progress_ms"]) if "progress_ms" in info else None
+#             ),
+#             is_playing=info["is_playing"] if "is_playing" in info else None,
+#             progress=info["progress_ms"] if "progress_ms" in info else None,
+#         )
 
 
-class NowPlayingMixed(NowPlaying):
-    def __init__(self, sync_interval=50, update_callback=None):
-        super().__init__(sync_interval, update_callback)
-        self.system = NowPlayingSystem(-1, update_callback)
-        self.spotify = NowPlayingSpotify(-1, update_callback)
-        self.system_begin_time = None
-        self.synced_with_spotify = False
+# class NowPlayingMixed(NowPlaying):
+#     def __init__(self, sync_interval=50, update_callback=None):
+#         super().__init__(sync_interval, update_callback)
+#         self.system = NowPlayingSystem(-1, update_callback)
+#         self.spotify = NowPlayingSpotify(-1, update_callback)
+#         self.system_begin_time = None
+#         self.synced_with_spotify = False
 
-    def update_check(self, old_playing_info, new_playing_info):
-        if old_playing_info is None:
-            return True
-        if new_playing_info.is_playing != old_playing_info.is_playing:
-            return True
-        if (
-            new_playing_info.current_track_artist
-            != old_playing_info.current_track_artist
-        ):
-            return True
-        if new_playing_info.current_track_title != old_playing_info.current_track_title:
-            return True
-        if new_playing_info.progress != old_playing_info.progress:
-            return True
-        return False
+#     def update_check(self, old_playing_info, new_playing_info):
+#         if old_playing_info is None:
+#             return True
+#         if new_playing_info.is_playing != old_playing_info.is_playing:
+#             return True
+#         if (
+#             new_playing_info.current_track_artist
+#             != old_playing_info.current_track_artist
+#         ):
+#             return True
+#         if new_playing_info.current_track_title != old_playing_info.current_track_title:
+#             return True
+#         if new_playing_info.progress != old_playing_info.progress:
+#             return True
+#         return False
 
-    def track_check(self, old_playing_info, new_playing_info):
-        if old_playing_info is None or new_playing_info is None:
-            return True
-        if old_playing_info.current_track == new_playing_info.current_track:
-            if old_playing_info.current_track_id is not None:
-                new_playing_info.current_track_id = old_playing_info.current_track_id
-            return False
-        return True
+#     def track_check(self, old_playing_info, new_playing_info):
+#         if old_playing_info is None or new_playing_info is None:
+#             return True
+#         if old_playing_info.current_track == new_playing_info.current_track:
+#             if old_playing_info.current_track_id is not None:
+#                 new_playing_info.current_track_id = old_playing_info.current_track_id
+#             return False
+#         return True
 
-    def sync(self):
-        # if self.playing_info is not None and self.playing_info.is_playing:
-        #     logging.info(
-        #         f"NOW PLAYING: {self.playing_info.current_track_artist} - {self.playing_info.current_track_title} ({int(time.time()*1000) - self.playing_info.current_begin_time}/{self.playing_info.current_track_length})"
-        #     )
-        logging.info("TRY SYNC WITH SYSTEM")
-        if not self.sync_mutex.tryLock(timeout=0):
-            logging.info("SYNCING SKIPPED")
-            return
-        info = asyncio.run(self.system.get_now_playing_info())
-        if info is None:
-            self.sync_mutex.unlock()
-            return
-        if not info.is_playing:
-            logging.info("PAUSING")
-            self.playing_info = info
-            if self.update_callback is not None:
-                self.update_callback(self.playing_info)
-            self.sync_mutex.unlock()
-            return
-        if self.track_check(self.playing_info, info):
-            print("NEW TRACK: ", info.current_track)
-            self.playing_info = info
-            self.synced_with_spotify = False
-        if not self.synced_with_spotify:
-            logging.info("TRY SYNCING WITH SPOTIFY TO GET ID")
-            onlineinfo = asyncio.run(self.spotify.get_now_playing_info())
-            if onlineinfo is None or onlineinfo.current_track_id is None:
-                self.synced_with_spotify = False
-                logging.info("FAILED TO SYNC WITH SPOTIFY")
-                self.sync_mutex.unlock()
-                return
-            if self.playing_info.current_track != onlineinfo.current_track:
-                self.synced_with_spotify = False
-                logging.info("SPOTIFY NOT UPDATED YET")
-                self.sync_mutex.unlock()
-                return
-            self.playing_info.current_track_id = onlineinfo.current_track_id
-            self.synced_with_spotify = True
-            print("NEW TRACK: ", info.current_track)
-            if self.update_callback is not None:
-                self.update_callback(self.playing_info)
-        elif self.system.update_check(self.playing_info, info):
-            logging.info("SYNCING")
-            self.playing_info = info
-        self.sync_mutex.unlock()
+#     def sync(self):
+#         # if self.playing_info is not None and self.playing_info.is_playing:
+#         #     logging.info(
+#         #         f"NOW PLAYING: {self.playing_info.current_track_artist} - {self.playing_info.current_track_title} ({int(time.time()*1000) - self.playing_info.current_begin_time}/{self.playing_info.current_track_length})"
+#         #     )
+#         logging.info("TRY SYNC WITH SYSTEM")
+#         if not self.sync_mutex.tryLock(timeout=0):
+#             logging.info("SYNCING SKIPPED")
+#             return
+#         info = asyncio.run(self.system.get_now_playing_info())
+#         if info is None:
+#             self.sync_mutex.unlock()
+#             return
+#         if not info.is_playing:
+#             logging.info("PAUSING")
+#             self.playing_info = info
+#             if self.update_callback is not None:
+#                 self.update_callback(self.playing_info)
+#             self.sync_mutex.unlock()
+#             return
+#         if self.track_check(self.playing_info, info):
+#             print("NEW TRACK: ", info.current_track)
+#             self.playing_info = info
+#             self.synced_with_spotify = False
+#         if not self.synced_with_spotify:
+#             logging.info("TRY SYNCING WITH SPOTIFY TO GET ID")
+#             onlineinfo = asyncio.run(self.spotify.get_now_playing_info())
+#             if onlineinfo is None or onlineinfo.current_track_id is None:
+#                 self.synced_with_spotify = False
+#                 logging.info("FAILED TO SYNC WITH SPOTIFY")
+#                 self.sync_mutex.unlock()
+#                 return
+#             if self.playing_info.current_track != onlineinfo.current_track:
+#                 self.synced_with_spotify = False
+#                 logging.info("SPOTIFY NOT UPDATED YET")
+#                 self.sync_mutex.unlock()
+#                 return
+#             self.playing_info.current_track_id = onlineinfo.current_track_id
+#             self.synced_with_spotify = True
+#             print("NEW TRACK: ", info.current_track)
+#             if self.update_callback is not None:
+#                 self.update_callback(self.playing_info)
+#         elif self.system.update_check(self.playing_info, info):
+#             logging.info("SYNCING")
+#             self.playing_info = info
+#         self.sync_mutex.unlock()
 
 
 if __name__ == "__main__":
+    
+    def callback(trigger):
+        if trigger == PlayingStatusTrigger.PAUSE:
+            print("PAUSE")
+        elif trigger == PlayingStatusTrigger.RESUME:
+            print("RESUME")
+        elif trigger == PlayingStatusTrigger.NEW_TRACK:
+            print("NEW TRACK")
+    
     app = QApplication(sys.argv)
-    np = NowPlayingSystem()
+    np = NowPlayingSystem(update_callback=callback)
     np.start_loop()
     breakpoint()
     sys.exit(app.exec_())
