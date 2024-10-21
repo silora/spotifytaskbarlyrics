@@ -1,13 +1,10 @@
-# Minimal ~~Desktop~~ Taskbar Lyrics For *(Mainly)* Spotify 
+# LyricBar: <small style="color:grey">Minimal ~~Desktop~~ Taskbar Lyrics For *(Mainly)* Spotify </small>
 
-**You can still tweak it to make it like a normal draggable lyrics widget though**
-
-<span style="color:red; font-weight:bold;">Also works for other music players! (Though I didn't try many...)</span>
-
-***UNDER DEVELOPMENT (maybe)***
-***Only tested on my own pc. Can be buggy.***
-
-**VERY PRETTY!**
+- ***UNDER DEVELOPMENT (maybe)***
+- ***Only tested on my own pc. Can be buggy.***
+- **You can still tweak it to make it like a normal draggable lyrics widget though**
+- <span style="color:red; font-weight:bold;">Also works for other music players! (Though I didn't try many...)</span>
+- **VERY PRETTY!**
 
 | Layout |
 |:------:|
@@ -44,9 +41,33 @@ python ./ui.py
 | Scroll Up/Down | Adjust track lyrics offset |
 | Shift + Scroll Up/Down | Adjust global lyrics offset |
 
-**It should be noted that the song progress from WRT may be within 0-1 second error, if this bothers you then maybe you should use other spotify-API-based desktop lyrics.**
+- It should be noted that the song progress from WRT may **be within 0-1 second error**, so you probably need to adjust global offset every run. If this bothers you then maybe you should use other spotify-API-based desktop lyrics.
 
-## Theme Screenshots
+## Theme 
+
+- Currently Available Options:
+    - Rule: Themes selection based on artist / track
+    - Font:
+        - Font Family
+        - Font Weight
+        - Font Color
+        - Font Size
+    - Outline:
+        - Outline Color
+        - Outline Width
+    - Shadow/Glow:
+        - Shadow/Glow Color
+        - Shadow/Glow Offset
+        - Shadow/Glow Radius
+    - Background:
+        - Background Color
+        - Background Image
+    - Entering Animation:
+        - Fade in
+        - Zoom in
+    - Line Formatter
+
+### Screenshots
 
 | Default |
 |:-------:|
@@ -95,6 +116,8 @@ python ./ui.py
 - [ ] Better theme management
 - [ ] Fix Musixmatch lyrics searching
 - [ ] Get better syncing with Spicetify?
+- [ ] Peek lines without changing offset
+- [ ] Visual feedback to actions
 
 
 
